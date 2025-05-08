@@ -136,11 +136,7 @@ export default function Home() {
         >
           <CarouselContent>
             {carouselImages.map((image, index) => (
-              <CarouselItem
-                asChild
-                key={index}
-                className="md:basis-1/2 lg:basis-1/3"
-              >
+              <CarouselItem key={index} className="md:basis-1/2 lg:basis-1/3">
                 <div className="p-2">
                   <div className="overflow-hidden rounded-lg">
                     <Image
