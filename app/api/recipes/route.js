@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-const systemMessage = `
-You are Chef Quirky, a fun and engaging recipe assistant. When asked for a recipe, provide a quirky introduction limited to **two short paragraphs** (3-4 sentences total, max 100 words), followed by the recipe in this format:
-
+const systemMessage = `You are Chef Quirky, a fun and engaging recipe assistant. When asked for a recipe, provide a quirky introduction limited to **two short paragraphs** (3-4 sentences total, max 100 words), followed by the recipe in this format:
 **Recipe Name**
 Ingredients:
 - Item 1
@@ -16,16 +11,19 @@ Instructions:
 1. Step 1
 2. Step 2
 ...
+For weekly requests, provide an introductory quirky response limited to **two short paragraphs** (3-4 sentences total, max 100 words), followed by seven recipes, each starting with '**Day: Recipe Name**', where Day is Monday to Sunday, followed by ingredients and instructions. Always ensure recipes are complete with ingredients and instructions.`;
 
-For weekly requests, provide an introductory quirky response limited to **two short paragraphs** (3-4 sentences total, max 100 words), followed by seven recipes, each starting with '**Day: Recipe Name**', where Day is Monday to Sunday, followed by ingredients and instructions. Always ensure recipes are complete with ingredients and instructions.
-`;
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 function parseRecipeResponse(text, isSingleRecipe = false) {
+  console.log("Raw API response:", text);
   const recipes = [];
-  let quirkyResponse = "";
+  const quirkyResponseLines = [];
+  const lines = text.split("\n");
   let currentRecipe = null;
   let currentSection = null;
-  let days = [
+  const days = [
     "Monday",
     "Tuesday",
     "Wednesday",
@@ -37,145 +35,155 @@ function parseRecipeResponse(text, isSingleRecipe = false) {
   let i = 0;
   let paragraphCount = 0;
   let sentenceCount = 0;
-  let maxSentences = 4;
+  const maxSentences = 4;
 
-  const lines = text.split("\n");
-  while (i < lines.length) {
-    const line = lines[i].trim();
-    if (!line) {
-      if (currentRecipe) {
-        i++;
-        continue;
-      }
-      if (quirkyResponse && quirkyResponse[quirkyResponse.length - 1] !== "") {
-        paragraphCount++;
-      }
-      quirkyResponse += "\n";
-      i++;
-      continue;
-    }
-
-    if (line.startsWith("**") && line.endsWith("**")) {
-      const header = line.slice(2, -2).trim();
-      if (isSingleRecipe) {
+  try {
+    while (i < lines.length) {
+      const line = lines[i].trim();
+      if (!line) {
         if (currentRecipe) {
-          recipes.push(currentRecipe);
+          i++;
+          continue;
         }
-        currentRecipe = {
-          name: header,
-          ingredients: [],
-          instructions: [],
-          day: "",
-        };
-        currentSection = "ingredients";
-        if (i > 0) {
-          quirkyResponse = lines.slice(0, i).join("\n");
+        if (
+          quirkyResponseLines.length &&
+          quirkyResponseLines[quirkyResponseLines.length - 1]
+        ) {
+          paragraphCount++;
         }
+        quirkyResponseLines.push("");
         i++;
         continue;
-      } else {
-        for (const d of days) {
-          if (header.startsWith(`${d}:`)) {
-            if (currentRecipe) {
-              recipes.push(currentRecipe);
+      }
+      if (line.startsWith("**") && line.endsWith("**")) {
+        const header = line.slice(2, -2).trim();
+        if (isSingleRecipe) {
+          if (currentRecipe) recipes.push(currentRecipe);
+          currentRecipe = {
+            name: header,
+            ingredients: [],
+            instructions: [],
+            day: "",
+          };
+          currentSection = "ingredients";
+          if (i > 0) quirkyResponseLines.push(...lines.slice(0, i));
+          i++;
+          continue;
+        } else {
+          for (const d of days) {
+            if (header.startsWith(`${d}:`)) {
+              if (currentRecipe) recipes.push(currentRecipe);
+              const name = header.replace(`${d}:`, "").trim();
+              currentRecipe = {
+                name,
+                ingredients: [],
+                instructions: [],
+                day: d,
+              };
+              currentSection = "ingredients";
+              break;
             }
-            const name = header.replace(`${d}:`, "").trim();
-            currentRecipe = { name, ingredients: [], instructions: [], day: d };
-            currentSection = "ingredients";
-            break;
           }
+          if (!currentRecipe) {
+            if (currentRecipe) recipes.push(currentRecipe);
+            currentRecipe = {
+              name: header,
+              ingredients: [],
+              instructions: [],
+              day: days[recipes.length] || "",
+            };
+            currentSection = "ingredients";
+          }
+          i++;
         }
-        if (!currentRecipe) {
-          quirkyResponse += line + "\n";
+      } else if (currentRecipe) {
+        if (line.toLowerCase().startsWith("ingredients:")) {
+          currentSection = "ingredients";
+        } else if (line.toLowerCase().startsWith("instructions:")) {
+          currentSection = "instructions";
+        } else if (
+          currentSection === "ingredients" &&
+          (line.startsWith("- ") ||
+            line.startsWith("* ") ||
+            line.startsWith("• "))
+        ) {
+          currentRecipe.ingredients.push(line.slice(2).trim());
+        } else if (
+          currentSection === "instructions" &&
+          (line.match(/^\d+\.\s/) ||
+            line.startsWith("- ") ||
+            line.startsWith("* ") ||
+            line.startsWith("• "))
+        ) {
+          const instruction = line.replace(/^\d+\.\s*|^[-*•]\s*/, "").trim();
+          if (instruction) currentRecipe.instructions.push(instruction);
+        }
+        i++;
+      } else {
+        const sentences = line.split(/[.!?]+/).filter((s) => s.trim());
+        sentenceCount += sentences.length;
+        if (sentenceCount <= maxSentences && paragraphCount < 2) {
+          quirkyResponseLines.push(line);
         }
         i++;
       }
-    } else if (currentRecipe) {
-      if (line.toLowerCase().startsWith("ingredients:")) {
-        currentSection = "ingredients";
-      } else if (line.toLowerCase().startsWith("instructions:")) {
-        currentSection = "instructions";
-      } else if (
-        currentSection === "ingredients" &&
-        (line.startsWith("- ") || line.startsWith("* "))
-      ) {
-        currentRecipe.ingredients.push(line.slice(2).trim());
-      } else if (currentSection === "instructions" && /^\d+\.\s/.test(line)) {
-        currentRecipe.instructions.push(line.replace(/^\d+\.\s*/, "").trim());
-      }
-      i++;
-    } else {
-      const sentences = line.split(/[.!?]+/);
-      sentenceCount += sentences.filter((s) => s.trim()).length;
-      if (sentenceCount <= maxSentences && paragraphCount < 2) {
-        quirkyResponse += line + "\n";
-      }
-      i++;
     }
-  }
+    if (currentRecipe) recipes.push(currentRecipe);
+    if (isSingleRecipe && recipes.length) recipes.length = 1;
 
-  if (currentRecipe) {
-    recipes.push(currentRecipe);
-  }
+    let quirkyResponse = quirkyResponseLines
+      .filter((line) => line.trim())
+      .join("\n")
+      .trim();
+    const words = quirkyResponse.split(/\s+/);
+    if (words.length > 100)
+      quirkyResponse = words.slice(0, 100).join(" ") + "...";
 
-  if (isSingleRecipe && recipes.length > 0) {
-    recipes.length = 1;
+    console.log("Parsed response:", { quirkyResponse, recipes });
+    return { quirkyResponse, recipes };
+  } catch (error) {
+    console.error("Error parsing response:", error);
+    return {
+      quirkyResponse: "",
+      recipes: [],
+      error: "Failed to parse recipe response.",
+    };
   }
-
-  quirkyResponse = quirkyResponse.trim();
-  const words = quirkyResponse.split(/\s+/);
-  if (words.length > 100) {
-    quirkyResponse = words.slice(0, 100).join(" ") + "...";
-  }
-
-  return { quirkyResponse, recipes };
 }
 
 export async function POST(request) {
   try {
-    console.log("Received recipe request");
-
     if (!process.env.GEMINI_API_KEY) {
-      console.error("GEMINI_API_KEY is not configured");
-      throw new Error("GEMINI_API_KEY is not configured");
+      return NextResponse.json(
+        {
+          error:
+            "API key not configured. Please check your environment variables.",
+        },
+        { status: 500 }
+      );
     }
-
-    const body = await request.json();
-    console.log("Request body:", body);
-
-    const { recipeName, userInput } = body;
-    console.log("Recipe name:", recipeName);
-    console.log("User input:", userInput);
-
-    // Use either recipeName or userInput
-    const recipeRequest = recipeName || userInput;
-
-    if (!recipeRequest) {
-      console.error("No recipe name or user input provided");
+    const { userInput } = await request.json();
+    if (!userInput) {
       return NextResponse.json(
         { error: "Please tell Chef Quirky what you'd like to cook!" },
         { status: 400 }
       );
     }
-
-    console.log("Generating recipe for:", recipeRequest);
-    const prompt = `${systemMessage}\n\nGenerate a recipe for: ${recipeRequest}`;
+    const prompt = `${systemMessage}\n\nGenerate a recipe for: ${userInput}`;
     const result = await model.generateContent(prompt);
     const response = await result.response;
     const text = response.text();
     console.log("Generated recipe text:", text);
-
     const { quirkyResponse, recipes } = parseRecipeResponse(text, true);
-    console.log(
-      "Parsed response:",
-      JSON.stringify({ quirkyResponse, recipes }, null, 2)
-    );
-
     if (!recipes || recipes.length === 0) {
-      console.error("No recipes were generated");
-      throw new Error("No recipe was generated");
+      return NextResponse.json(
+        {
+          error:
+            "Chef Quirky couldn't understand the recipe format. Please try again!",
+        },
+        { status: 500 }
+      );
     }
-
     const recipe = recipes[0];
     if (
       !recipe.ingredients ||
@@ -183,59 +191,61 @@ export async function POST(request) {
       recipe.ingredients.length === 0 ||
       recipe.instructions.length === 0
     ) {
-      console.error("Recipe is incomplete:", recipe);
-      throw new Error("Recipe is incomplete");
-    }
-
-    // Generate image for the recipe
-    try {
-      // Get the host from the request headers
-      const host = request.headers.get("host");
-      const protocol =
-        process.env.NODE_ENV === "development" ? "http" : "https";
-      const imageUrl = `${protocol}://${host}/api/generate-image`;
-
-      console.log("Requesting image generation from:", imageUrl);
-      const imageResponse = await fetch(imageUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      return NextResponse.json(
+        {
+          error:
+            "The recipe is missing ingredients or instructions. Please try again!",
         },
-        body: JSON.stringify({
-          prompt: `A beautiful photo of ${recipe.name}`,
-        }),
-      });
-
-      if (!imageResponse.ok) {
-        console.error("Image generation failed:", await imageResponse.text());
-        throw new Error(`Image generation failed: ${imageResponse.statusText}`);
-      }
-
-      const imageData = await imageResponse.json();
-      console.log("Image generation response:", imageData);
-
-      if (imageData.imageUrl) {
-        console.log("Adding image URL to recipe:", imageData.imageUrl);
-        recipe.imageUrl = imageData.imageUrl;
-      } else {
-        console.error("No image URL in response:", imageData);
-      }
-    } catch (imageError) {
-      console.error("Error generating image:", imageError);
-      // Don't throw error if image generation fails
+        { status: 500 }
+      );
     }
-
-    console.log("Final recipe with image:", recipe);
-    return NextResponse.json({
-      quirkyResponse,
-      recipe,
-    });
+    if (process.env.REPLICATE_API_KEY) {
+      try {
+        // Construct absolute URL for the image generation endpoint
+        const host = request.headers.get("host") || "localhost:3000";
+        const protocol =
+          process.env.NODE_ENV === "production" ? "https" : "http";
+        const imageApiUrl = `${protocol}://${host}/api/generate-image`;
+        console.log(`Fetching image from: ${imageApiUrl}`);
+        const imageResponse = await fetch(imageApiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: `A beautiful photo of ${recipe.name}`,
+          }),
+        });
+        if (imageResponse.ok) {
+          const imageData = await imageResponse.json();
+          if (imageData.imageUrl) {
+            console.log(`Image generated successfully: ${imageData.imageUrl}`);
+            recipe.imageUrl = imageData.imageUrl;
+          } else {
+            console.warn("Image response missing imageUrl:", imageData);
+          }
+        } else {
+          console.warn(
+            "Image API responded with status:",
+            imageResponse.status,
+            await imageResponse.text()
+          );
+        }
+      } catch (imageError) {
+        console.error(
+          "Error generating image:",
+          imageError.message,
+          imageError.stack
+        );
+      }
+    } else {
+      console.warn(
+        "REPLICATE_API_KEY not configured, skipping image generation"
+      );
+    }
+    return NextResponse.json({ quirkyResponse, recipe });
   } catch (error) {
-    console.error("Error in recipe generation:", error);
+    console.error("Error in recipe generation:", error.message, error.stack);
     return NextResponse.json(
-      {
-        error: error.message || "Chef Quirky hit a snag. Try again!",
-      },
+      { error: `Chef Quirky hit a snag: ${error.message}. Try again!` },
       { status: 500 }
     );
   }

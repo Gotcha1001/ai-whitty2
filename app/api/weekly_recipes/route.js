@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import axios from "axios";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const systemMessage = `You are Chef Quirky, a fun and engaging recipe assistant. When asked for a recipe, provide a quirky introduction limited to **two short paragraphs** (3-4 sentences total, max 100 words), followed by the recipe in this format:
 **Recipe Name**
@@ -13,63 +13,11 @@ Instructions:
 ...
 For weekly requests, provide an introductory quirky response limited to **two short paragraphs** (3-4 sentences total, max 100 words), followed by seven recipes, each starting with '**Day: Recipe Name**', where Day is Monday to Sunday, followed by ingredients and instructions. Always ensure recipes are complete with ingredients and instructions.`;
 
-export async function GET() {
-  try {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error("GEMINI_API_KEY is not configured");
-    }
-
-    const response = await axios.post(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent",
-      {
-        contents: [
-          {
-            parts: [
-              {
-                text: `${systemMessage}\n\nProvide seven dinner recipes for the week, one for each day (Monday to Sunday).`,
-              },
-            ],
-          },
-        ],
-      },
-      {
-        headers: {
-          "x-goog-api-key": process.env.GEMINI_API_KEY,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    if (!response.data.candidates?.[0]?.content?.parts?.[0]?.text) {
-      throw new Error("Invalid response format from Gemini API");
-    }
-
-    const text = response.data.candidates[0].content.parts[0].text;
-    const { quirkyResponse, recipes } = parseRecipeResponse(text, false);
-
-    if (!recipes || recipes.length === 0) {
-      throw new Error("No recipes were generated");
-    }
-
-    return NextResponse.json({ quirkyResponse, recipes });
-  } catch (error) {
-    console.error(
-      "Error in weekly_recipes API:",
-      error.response?.data || error.message
-    );
-    return NextResponse.json(
-      {
-        error:
-          error.response?.data?.error?.message ||
-          error.message ||
-          "Chef Quirky couldn't plan your week. Try again!",
-      },
-      { status: error.response?.status || 500 }
-    );
-  }
-}
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 function parseRecipeResponse(text, isSingleRecipe = false) {
+  console.log("Raw API response:", text);
   const recipes = [];
   const quirkyResponseLines = [];
   const lines = text.split("\n");
@@ -89,82 +37,142 @@ function parseRecipeResponse(text, isSingleRecipe = false) {
   let sentenceCount = 0;
   const maxSentences = 4;
 
-  while (i < lines.length) {
-    const line = lines[i].trim();
-    if (!line) {
-      if (currentRecipe) {
-        i++;
-        continue;
-      }
-      if (
-        quirkyResponseLines.length &&
-        quirkyResponseLines[quirkyResponseLines.length - 1]
-      ) {
-        paragraphCount++;
-      }
-      quirkyResponseLines.push("");
-      i++;
-      continue;
-    }
-    if (line.startsWith("**") && line.endsWith("**")) {
-      const header = line.slice(2, -2).trim();
-      if (isSingleRecipe) {
-        if (currentRecipe) recipes.push(currentRecipe);
-        currentRecipe = {
-          name: header,
-          ingredients: [],
-          instructions: [],
-          day: "",
-        };
-        currentSection = "ingredients";
-        if (i > 0) quirkyResponseLines.push(...lines.slice(0, i));
-        i++;
-        continue;
-      } else {
-        for (const d of days) {
-          if (header.startsWith(`${d}:`)) {
-            if (currentRecipe) recipes.push(currentRecipe);
-            const name = header.replace(`${d}:`, "").trim();
-            currentRecipe = { name, ingredients: [], instructions: [], day: d };
-            currentSection = "ingredients";
-            break;
-          }
+  try {
+    while (i < lines.length) {
+      const line = lines[i].trim();
+      if (!line) {
+        if (currentRecipe) {
+          i++;
+          continue;
         }
+        if (
+          quirkyResponseLines.length &&
+          quirkyResponseLines[quirkyResponseLines.length - 1]
+        ) {
+          paragraphCount++;
+        }
+        quirkyResponseLines.push("");
+        i++;
+        continue;
       }
-      i++;
-    } else if (currentRecipe) {
-      if (line.toLowerCase().startsWith("ingredients:")) {
-        currentSection = "ingredients";
-      } else if (line.toLowerCase().startsWith("instructions:")) {
-        currentSection = "instructions";
-      } else if (
-        currentSection === "ingredients" &&
-        (line.startsWith("- ") || line.startsWith("* "))
-      ) {
-        currentRecipe.ingredients.push(line.slice(2).trim());
-      } else if (currentSection === "instructions" && /^\d+\.\s/.test(line)) {
-        currentRecipe.instructions.push(line.replace(/^\d+\.\s*/, "").trim());
+      if (line.startsWith("**") && line.endsWith("**")) {
+        const header = line.slice(2, -2).trim();
+        if (isSingleRecipe) {
+          if (currentRecipe) recipes.push(currentRecipe);
+          currentRecipe = {
+            name: header,
+            ingredients: [],
+            instructions: [],
+            day: "",
+          };
+          currentSection = "ingredients";
+          if (i > 0) quirkyResponseLines.push(...lines.slice(0, i));
+          i++;
+          continue;
+        } else {
+          for (const d of days) {
+            if (header.startsWith(`${d}:`)) {
+              if (currentRecipe) recipes.push(currentRecipe);
+              const name = header.replace(`${d}:`, "").trim();
+              currentRecipe = {
+                name,
+                ingredients: [],
+                instructions: [],
+                day: d,
+              };
+              currentSection = "ingredients";
+              break;
+            }
+          }
+          if (!currentRecipe) {
+            if (currentRecipe) recipes.push(currentRecipe);
+            currentRecipe = {
+              name: header,
+              ingredients: [],
+              instructions: [],
+              day: days[recipes.length] || "",
+            };
+            currentSection = "ingredients";
+          }
+          i++;
+        }
+      } else if (currentRecipe) {
+        if (line.toLowerCase().startsWith("ingredients:")) {
+          currentSection = "ingredients";
+        } else if (line.toLowerCase().startsWith("instructions:")) {
+          currentSection = "instructions";
+        } else if (
+          currentSection === "ingredients" &&
+          (line.startsWith("- ") ||
+            line.startsWith("* ") ||
+            line.startsWith("• "))
+        ) {
+          currentRecipe.ingredients.push(line.slice(2).trim());
+        } else if (
+          currentSection === "instructions" &&
+          (line.match(/^\d+\.\s/) ||
+            line.startsWith("- ") ||
+            line.startsWith("* ") ||
+            line.startsWith("• "))
+        ) {
+          const instruction = line.replace(/^\d+\.\s*|^[-*•]\s*/, "").trim();
+          if (instruction) currentRecipe.instructions.push(instruction);
+        }
+        i++;
+      } else {
+        const sentences = line.split(/[.!?]+/).filter((s) => s.trim());
+        sentenceCount += sentences.length;
+        if (sentenceCount <= maxSentences && paragraphCount < 2) {
+          quirkyResponseLines.push(line);
+        }
+        i++;
       }
-      i++;
-    } else {
-      const sentences = line.split(/[.!?]+/).filter((s) => s.trim());
-      sentenceCount += sentences.length;
-      if (sentenceCount <= maxSentences && paragraphCount < 2) {
-        quirkyResponseLines.push(line);
-      }
-      i++;
     }
+    if (currentRecipe) recipes.push(currentRecipe);
+    if (isSingleRecipe && recipes.length) recipes.length = 1;
+
+    let quirkyResponse = quirkyResponseLines
+      .filter((line) => line.trim())
+      .join("\n")
+      .trim();
+    const words = quirkyResponse.split(/\s+/);
+    if (words.length > 100)
+      quirkyResponse = words.slice(0, 100).join(" ") + "...";
+
+    console.log("Parsed response:", { quirkyResponse, recipes });
+    return { quirkyResponse, recipes };
+  } catch (error) {
+    console.error("Error parsing response:", error);
+    return {
+      quirkyResponse: "",
+      recipes: [],
+      error: "Failed to parse recipe response.",
+    };
   }
-  if (currentRecipe) recipes.push(currentRecipe);
-  if (isSingleRecipe && recipes.length) recipes.length = 1;
+}
 
-  let quirkyResponse = quirkyResponseLines
-    .filter((line) => line.trim())
-    .join("\n")
-    .trim();
-  const words = quirkyResponse.split(/\s+/);
-  if (words.length > 100)
-    quirkyResponse = words.slice(0, 100).join(" ") + "...";
-
-  return { quirkyResponse, recipes };
+export async function GET() {
+  try {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error("GEMINI_API_KEY is not configured");
+    }
+    const prompt = `${systemMessage}\n\nProvide seven unique recipes for the week, one for each day (Monday to Sunday). Ensure each is diverse and includes both ingredients and instructions.`;
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+    const { quirkyResponse, recipes } = parseRecipeResponse(text, false);
+    if (!recipes || recipes.length === 0) {
+      throw new Error("No weekly recipes generated");
+    }
+    return NextResponse.json({ quirkyResponse, recipes });
+  } catch (error) {
+    console.error("Error in weekly recipes API:", error);
+    return NextResponse.json(
+      {
+        error:
+          error.message || "Chef Quirky couldn't plan your week. Try again!",
+      },
+      { status: 500 }
+    );
+  }
 }

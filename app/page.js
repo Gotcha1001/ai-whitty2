@@ -7,9 +7,9 @@ export default function Home() {
       <Image
         src="/food.jpg"
         alt="Delicious meal"
-        width={1200}
-        height={400}
-        className="w-full h-96 object-cover rounded-lg shadow-lg"
+        width={1000} // Reduced from 1200 to match new max width
+        height={600} // Kept taller height
+        className="w-full max-w-[1000px] mx-auto h-auto max-h-[400px] md:max-h-[600px] object-cover rounded-lg shadow-lg"
       />
       <div className="text-center mt-6">
         <h1 className="text-4xl font-bold text-white mb-4">
