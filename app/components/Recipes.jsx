@@ -1635,14 +1635,18 @@ function generateRecipePDF(recipes) {
                 const x = 20;
                 const y = yOffset;
                 const width = 170;
-                const height = 120; // Increased height for PDF
+                const height = 150; // Increased height for PDF
                 const radius = 10;
 
                 doc.setDrawColor(200, 200, 200);
                 doc.setLineWidth(0.5);
                 doc.roundedRect(x, y, width, height, radius, radius, 'S');
                 doc.addImage(recipe.imageUrl, 'JPEG', x, y, width, height, undefined, 'FAST', 0);
-                yOffset += 130;
+                yOffset += 160; // Adjusted to height + 10 for padding
+                if (yOffset > 260) { // Check for page overflow after image
+                    doc.addPage();
+                    yOffset = 20;
+                }
             } catch (error) {
                 console.error('Error adding image to PDF:', error);
                 yOffset += 10;
@@ -1880,8 +1884,30 @@ export default function Recipes() {
         doc.save('weekly_recipes.pdf');
     };
 
+
+
+
+    const handleDownloadImage = async (imageUrl, recipeName) => {
+        try {
+            const response = await fetch(imageUrl);
+            if (!response.ok) throw new Error("Failed to fetch image");
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `${recipeName.toLowerCase().replace(/\s+/g, '_')}.jpg`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error("Error downloading image:", error);
+            setError("Failed to download image. Please try again!");
+        }
+    };
+
     return (
-        <div className="min-h-screen bg-gradient-to-br from-purple-800 to-gray-900 p-8">
+        <div className="min-h-screen bg-gradient-to-br from-purple-800 via-blue-500 to-indigo-900 p-8 rounded-lg">
             <div className="max-w-4xl mx-auto bg-gray-900 bg-opacity-80 p-8 rounded-lg shadow-lg">
                 <MotionWrapperDelay
                     initial="hidden"
@@ -1931,7 +1957,7 @@ export default function Recipes() {
                             value={userInput}
                             onChange={(e) => setUserInput(e.target.value)}
                             placeholder="What do you want to cook today? (e.g., Vegan pasta)"
-                            className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-purple-400"
+                            className="w-full p-3 bg-gray-300 border border-gray-600 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:border-purple-400"
                         />
                     </MotionWrapperDelay>
                     <div className="flex justify-center mt-3">
@@ -2146,12 +2172,22 @@ export default function Recipes() {
                                 </ol>
                             </div>
                         </div>
-                        <button
-                            onClick={() => handleDownloadPDF(individualRecipe)}
-                            className="mt-6 flex items-center gap-2 bg-gradient-to-r from-purple-600 to-purple-800 text-white px-4 py-2 rounded-lg hover:from-purple-700 hover:to-purple-900 z-10"
-                        >
-                            <FaDownload /> Download Recipe
-                        </button>
+                        <div className="mt-6 flex gap-4">
+                            <button
+                                onClick={() => handleDownloadPDF(individualRecipe)}
+                                className="flex items-center gap-2 bg-gradient-to-r from-purple-600 to-purple-800 text-white px-4 py-2 rounded-lg hover:from-purple-700 hover:to-purple-900 z-10"
+                            >
+                                <FaDownload /> Download Recipe (PDF)
+                            </button>
+                            {individualRecipe.imageUrl && (
+                                <button
+                                    onClick={() => handleDownloadImage(individualRecipe.imageUrl, individualRecipe.name)}
+                                    className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-blue-800 text-white px-4 py-2 rounded-lg hover:from-blue-700 hover:to-blue-900 z-10"
+                                >
+                                    <FaDownload /> Download Image
+                                </button>
+                            )}
+                        </div>
                     </div>
                 )}
 
