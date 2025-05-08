@@ -751,7 +751,8 @@ import { useRouter } from "next/navigation";
 import { jsPDF } from "jspdf";
 import { FaDownload, FaSpinner, FaArrowLeft } from "react-icons/fa";
 import axios from 'axios';
-import MotionWrapperDelay from "./FramerMotionStuff/MotionWrapperDelay";
+import MotionWrapperDelay from "./FramerMotion/MotionWrapperDelay";
+
 
 const systemMessage = `You are Chef Quirky, a fun and engaging recipe assistant. When asked for a recipe, provide a quirky introduction limited to **two short paragraphs** (3-4 sentences total, max 100 words), followed by the recipe in this format:
 **Recipe Name**
