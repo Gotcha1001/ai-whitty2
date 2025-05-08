@@ -7,7 +7,6 @@ import { FaDownload, FaSpinner, FaArrowLeft } from "react-icons/fa";
 import axios from 'axios';
 import MotionWrapperDelay from "./FramerMotionStuff/MotionWrapperDelay";
 
-
 const systemMessage = `You are Chef Quirky, a fun and engaging recipe assistant. When asked for a recipe, provide a quirky introduction limited to **two short paragraphs** (3-4 sentences total, max 100 words), followed by the recipe in this format:
 **Recipe Name**
 Ingredients:
@@ -115,45 +114,72 @@ function generateRecipePDF(recipes) {
     let yOffset = 20;
 
     recipes.forEach((recipe) => {
+        console.log('Recipe for PDF:', recipe); // Debug recipe object
+        // Add recipe name
         doc.setFontSize(16);
         doc.text(`${recipe.day ? recipe.day + ': ' : ''}${recipe.name}`, 20, yOffset);
         yOffset += 10;
 
+        // Add image if available
         if (recipe.imageUrl) {
             try {
                 const x = 20;
                 const y = yOffset;
                 const width = 170;
-                const height = 150;
+                const height = 100; // Reduced height to save space
                 const radius = 10;
 
                 doc.setDrawColor(200, 200, 200);
                 doc.setLineWidth(0.5);
                 doc.roundedRect(x, y, width, height, radius, radius, 'S');
                 doc.addImage(recipe.imageUrl, 'JPEG', x, y, width, height, undefined, 'FAST', 0);
-                yOffset += 160;
+                yOffset += 110; // Adjust yOffset for image
             } catch (error) {
                 console.error('Error adding image to PDF:', error);
+                yOffset += 10; // Minimal offset if image fails
             }
         }
 
+        // Add ingredients section
         doc.setFontSize(12);
         doc.text('Ingredients:', 20, yOffset);
         yOffset += 10;
-        recipe.ingredients.forEach((ing) => {
-            doc.text(`- ${ing}`, 30, yOffset);
+        if (recipe.ingredients && recipe.ingredients.length > 0) {
+            recipe.ingredients.forEach((ing) => {
+                const splitText = doc.splitTextToSize(`- ${ing}`, 160); // Wrap text to avoid overflow
+                doc.text(splitText, 30, yOffset);
+                yOffset += splitText.length * 7; // Adjust yOffset based on text lines
+                if (yOffset > 260) {
+                    doc.addPage();
+                    yOffset = 20;
+                }
+            });
+        } else {
+            doc.text('- No ingredients provided.', 30, yOffset);
             yOffset += 10;
-        });
+        }
 
+        // Add instructions section
+        yOffset += 10; // Extra spacing before instructions
         doc.text('Instructions:', 20, yOffset);
         yOffset += 10;
-        recipe.instructions.forEach((instr, index) => {
-            doc.text(`${index + 1}. ${instr}`, 30, yOffset);
+        if (recipe.instructions && recipe.instructions.length > 0) {
+            recipe.instructions.forEach((instr, index) => {
+                const splitText = doc.splitTextToSize(`${index + 1}. ${instr}`, 160); // Wrap text
+                doc.text(splitText, 30, yOffset);
+                yOffset += splitText.length * 7; // Adjust yOffset based on text lines
+                if (yOffset > 260) {
+                    doc.addPage();
+                    yOffset = 20;
+                }
+            });
+        } else {
+            doc.text('- No instructions provided.', 30, yOffset);
             yOffset += 10;
-        });
+        }
 
-        yOffset += 20;
-        if (yOffset > 250) {
+        yOffset += 20; // Extra spacing between recipes
+        if (yOffset > 260) {
             doc.addPage();
             yOffset = 20;
         }
@@ -594,46 +620,59 @@ export default function Recipes() {
                         </div>
                     </MotionWrapperDelay>
                 )}
+
                 {individualRecipe && (
-                    <div className="mt-8 p-6 bg-gray-900 rounded-lg shadow-lg z-10">
-                        <h2 className="text-2xl font-bold text-white mb-4">{individualRecipe.name}</h2>
-                        {individualRecipe.imageUrl ? (
-                            <div className="mb-6">
-                                <img
-                                    src={individualRecipe.imageUrl}
-                                    alt={individualRecipe.name}
-                                    className="w-full h-auto max-h-[500px] md:max-h-[600px] object-cover rounded-lg shadow-md"
-                                    onError={(e) => console.error(`Failed to load image: ${individualRecipe.imageUrl}`)}
-                                />
+                    <MotionWrapperDelay
+                        initial="hidden"
+                        whileInView="visible"
+                        viewport={{ once: true, amount: 0.5 }}
+                        transition={{ duration: 0.5 }}
+                        variants={{
+                            hidden: { opacity: 0, y: 20 },
+                            visible: { opacity: 1, y: 0 },
+                        }}
+                        onAnimationComplete={() => console.log('Individual recipe animation completed')}
+                    >
+                        <div className="mt-8 p-6 bg-gray-900 rounded-lg shadow-lg z-10">
+                            <h2 className="text-2xl font-bold text-white mb-4">{individualRecipe.name}</h2>
+                            {individualRecipe.imageUrl ? (
+                                <div className="mb-6">
+                                    <img
+                                        src={individualRecipe.imageUrl}
+                                        alt={individualRecipe.name}
+                                        className="w-full h-64 object-cover rounded-lg shadow-md"
+                                        onError={(e) => console.error(`Failed to load image: ${individualRecipe.imageUrl}`)}
+                                    />
+                                </div>
+                            ) : (
+                                <p className="text-white mb-6">No image available for this recipe.</p>
+                            )}
+                            <div className="grid md:grid-cols-2 gap-6">
+                                <div>
+                                    <h3 className="text-xl font-semibold text-white mb-2">Ingredients:</h3>
+                                    <ul className="list-disc pl-5 text-white">
+                                        {individualRecipe.ingredients.map((ingredient, index) => (
+                                            <li key={index} className="mb-1">{ingredient}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                                <div>
+                                    <h3 className="text-xl font-semibold text-white mb-2">Instructions:</h3>
+                                    <ol className="list-decimal pl-5 text-white">
+                                        {individualRecipe.instructions.map((instruction, index) => (
+                                            <li key={index} className="mb-2">{instruction}</li>
+                                        ))}
+                                    </ol>
+                                </div>
                             </div>
-                        ) : (
-                            <p className="text-white mb-6">No image available for this recipe.</p>
-                        )}
-                        <div className="grid md:grid-cols-2 gap-6">
-                            <div>
-                                <h3 className="text-xl font-semibold text-white mb-2">Ingredients:</h3>
-                                <ul className="list-disc pl-5 text-white">
-                                    {individualRecipe.ingredients.map((ingredient, index) => (
-                                        <li key={index} className="mb-1">{ingredient}</li>
-                                    ))}
-                                </ul>
-                            </div>
-                            <div>
-                                <h3 className="text-xl font-semibold text-white mb-2">Instructions:</h3>
-                                <ol className="list-decimal pl-5 text-white">
-                                    {individualRecipe.instructions.map((instruction, index) => (
-                                        <li key={index} className="mb-2">{instruction}</li>
-                                    ))}
-                                </ol>
-                            </div>
+                            <button
+                                onClick={() => handleDownloadPDF(individualRecipe)}
+                                className="mt-6 flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 z-10"
+                            >
+                                <FaDownload /> Download Recipe
+                            </button>
                         </div>
-                        <button
-                            onClick={() => handleDownloadPDF(individualRecipe)}
-                            className="mt-6 flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 z-10"
-                        >
-                            <FaDownload /> Download Recipe
-                        </button>
-                    </div>
+                    </MotionWrapperDelay>
                 )}
 
                 {weeklyRecipes.length > 0 ? (
